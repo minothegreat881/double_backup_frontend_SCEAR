@@ -1,0 +1,1892 @@
+"use client"
+
+import type React from "react"
+import { useState, useEffect } from "react"
+import { BookOpen, Plus, Pencil, Trash2, Save, X, Layout, AlignLeft, AlignRight, Star, Clock, User, Tag, Image as ImageIcon, Move, GripVertical } from "lucide-react"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import { useToast } from "@/hooks/use-toast"
+import Image from "next/image"
+import MediaLibrary from "./media-library"
+import { type StrapiHistoryArticle } from "@/lib/strapi-api"
+
+const STRAPI_BASE_URL = process.env.NEXT_PUBLIC_STRAPI_API_URL || (
+  typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:1341'      // Local development with separate port
+    : 'https://api.autoweb.store'  // Production domain with SSL
+);
+
+type ArticleType = "standard" | "auxiliary-forces" | "legion-timeline"
+type ArticleCategory = "auxiliary-forces" | "equipment" | "tactics" | "history" | "archaeology" | "sources" | "legion-history"
+
+// Map frontend categories to backend enum values
+const categoryMapping = {
+  'auxiliary-forces': 'Military History',
+  'equipment': 'Equipment & Arms',
+  'tactics': 'Military History',
+  'history': 'Historical Research',
+  'archaeology': 'Archaeological Finds',
+  'sources': 'Historical Research',
+  'legion-history': 'Military History'
+} as const
+
+// Reverse mapping for displaying backend values in frontend
+const categoryReverseMapping = {
+  'Military History': 'history',
+  'Equipment & Arms': 'equipment',
+  'Historical Research': 'history',
+  'Archaeological Finds': 'archaeology',
+  'Reenactment Guides': 'tactics',
+  'Culture & Society': 'history'
+} as const
+
+type SectionData = {
+  title: string
+  content: string
+  quote?: string
+  additionalContent?: string[]
+}
+
+type ImageData = {
+  image?: any
+  alt: string
+  caption: string
+  description?: string
+  // Nové vlastnosti pre pokročilé zarovnanie
+  position?: 'left' | 'right' | 'center' | 'full' | 'side-by-side'
+  size?: 'small' | 'medium' | 'large'
+  wrapText?: boolean
+  pairedWith?: number // Index druhého obrázka pre side-by-side
+  spacing?: 'tight' | 'normal' | 'wide'
+}
+
+type KeyFact = {
+  number: number
+  title: string
+  description: string
+}
+
+type TimelineEvent = {
+  year: string
+  event: string
+}
+
+type UnitType = {
+  title: string
+  units: string[]
+}
+
+type ContentBlock = {
+  __component: string
+  id?: number
+  content: string
+  image?: any
+  alt?: string
+  caption?: string
+  position?: "left" | "right" | "center" | "full-width"
+  size?: "small" | "medium" | "large" | "full"
+  alignment?: "left" | "center" | "right" | "justify"
+  spacing?: "none" | "small" | "medium" | "large"
+  shadow?: boolean
+}
+
+
+type Article = {
+  id?: number
+  documentId?: string
+  title: string
+  subtitle?: string
+  content: string
+  excerpt?: string
+  slug?: string
+  coverImage?: string
+  heroImage?: string
+  mainImage?: string
+  category: ArticleCategory
+  author: string
+  readingTime?: number
+  featured?: boolean
+  visible?: boolean
+  tags?: string[]
+  sources?: string[]
+  intro?: string
+  sections?: SectionData[]
+  images?: ImageData[]
+  keyFacts?: KeyFact[]
+  timeline?: TimelineEvent[]
+  unitTypes?: UnitType[]
+  contentBlocks?: ContentBlock[]
+  articleType: ArticleType
+  createdAt?: string
+  updatedAt?: string
+  publishedAt?: string
+}
+
+const ArticleTypeCard = ({
+  value,
+  label,
+  description,
+  icon: Icon,
+  isSelected,
+  onSelect,
+}: {
+  value: ArticleType
+  label: string
+  description: string
+  icon: React.ElementType
+  isSelected: boolean
+  onSelect: (value: ArticleType) => void
+}) => (
+  <div
+    onClick={() => onSelect(value)}
+    className={`cursor-pointer rounded-lg border-2 p-4 flex flex-col items-center justify-center gap-2 text-center transition-all ${
+      isSelected ? "border-red-800 ring-2 ring-red-800/50 bg-red-50" : "border-gray-200 hover:border-gray-400 bg-white"
+    }`}
+  >
+    <Icon className="h-8 w-8 text-red-800" />
+    <p className="text-sm font-medium text-gray-800">{label}</p>
+    <p className="text-xs text-gray-600">{description}</p>
+  </div>
+)
+
+const SectionEditor = ({ 
+  sections, 
+  setSections,
+  setContentCursorPosition,
+  setCurrentSectionIndex,
+  setIsInsertingImageInContent,
+  setIsMediaLibraryOpen
+}: { 
+  sections: SectionData[]
+  setSections: (sections: SectionData[]) => void
+  setContentCursorPosition: (pos: number) => void
+  setCurrentSectionIndex: (index: number) => void
+  setIsInsertingImageInContent: (value: boolean) => void
+  setIsMediaLibraryOpen: (value: boolean) => void
+}) => {
+  const addSection = () => {
+    setSections([...sections, { title: '', content: '', additionalContent: [] }])
+  }
+
+  const updateSection = (index: number, field: keyof SectionData, value: string) => {
+    const updated = [...sections]
+    if (field === 'additionalContent') {
+      updated[index][field] = value.split('\n').filter(line => line.trim())
+    } else {
+      updated[index][field] = value
+    }
+    setSections(updated)
+  }
+
+  const removeSection = (index: number) => {
+    setSections(sections.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Content Sections</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addSection}>
+          <Plus className="h-4 w-4 mr-1" /> Add Section
+        </Button>
+      </div>
+      {sections.map((section, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h5 className="text-sm font-medium text-gray-700">Section {index + 1}</h5>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeSection(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <Input
+              placeholder="Section title"
+              value={section.title}
+              onChange={(e) => updateSection(index, 'title', e.target.value)}
+            />
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-gray-600">Section Content</label>
+              <Textarea
+                id={`section-content-${index}`}
+                placeholder="Section content"
+                value={section.content}
+                onChange={(e) => updateSection(index, 'content', e.target.value)}
+                rows={8}
+                className="min-h-[200px] resize-y"
+              />
+            </div>
+            <Textarea
+              placeholder="Quote (optional)"
+              value={section.quote || ''}
+              onChange={(e) => updateSection(index, 'quote', e.target.value)}
+              rows={2}
+            />
+            <Textarea
+              placeholder="Additional content (one paragraph per line)"
+              value={section.additionalContent?.join('\n') || ''}
+              onChange={(e) => updateSection(index, 'additionalContent', e.target.value)}
+              rows={6}
+              className="min-h-[150px] resize-y"
+            />
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+const KeyFactsEditor = ({ 
+  keyFacts, 
+  setKeyFacts 
+}: { 
+  keyFacts: KeyFact[]
+  setKeyFacts: (facts: KeyFact[]) => void 
+}) => {
+  const addKeyFact = () => {
+    setKeyFacts([...keyFacts, { number: keyFacts.length + 1, title: '', description: '' }])
+  }
+
+  const updateKeyFact = (index: number, field: keyof KeyFact, value: string | number) => {
+    const updated = [...keyFacts]
+    if (field === 'number') {
+      updated[index][field] = typeof value === 'string' ? parseInt(value) || 1 : value
+    } else {
+      updated[index][field] = value as string
+    }
+    setKeyFacts(updated)
+  }
+
+  const removeKeyFact = (index: number) => {
+    setKeyFacts(keyFacts.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Key Facts</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addKeyFact}>
+          <Plus className="h-4 w-4 mr-1" /> Add Key Fact
+        </Button>
+      </div>
+      {keyFacts.map((fact, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h5 className="text-sm font-medium text-gray-700">Key Fact {index + 1}</h5>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeKeyFact(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-2">
+              <Input
+                type="number"
+                placeholder="1"
+                value={fact.number}
+                onChange={(e) => updateKeyFact(index, 'number', parseInt(e.target.value) || 1)}
+              />
+            </div>
+            <div className="col-span-10">
+              <Input
+                placeholder="Fact title"
+                value={fact.title}
+                onChange={(e) => updateKeyFact(index, 'title', e.target.value)}
+                className="mb-2"
+              />
+              <Textarea
+                placeholder="Fact description"
+                value={fact.description}
+                onChange={(e) => updateKeyFact(index, 'description', e.target.value)}
+                rows={2}
+              />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+const TimelineEditor = ({ 
+  timeline, 
+  setTimeline 
+}: { 
+  timeline: TimelineEvent[]
+  setTimeline: (events: TimelineEvent[]) => void 
+}) => {
+  const addTimelineEvent = () => {
+    setTimeline([...timeline, { year: '', event: '' }])
+  }
+
+  const updateTimelineEvent = (index: number, field: keyof TimelineEvent, value: string) => {
+    const updated = [...timeline]
+    updated[index][field] = value
+    setTimeline(updated)
+  }
+
+  const removeTimelineEvent = (index: number) => {
+    setTimeline(timeline.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Timeline Events</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addTimelineEvent}>
+          <Plus className="h-4 w-4 mr-1" /> Add Timeline Event
+        </Button>
+      </div>
+      {timeline.map((event, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h5 className="text-sm font-medium text-gray-700">Event {index + 1}</h5>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeTimelineEvent(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-3">
+              <Input
+                placeholder="Year (e.g. 15 BC)"
+                value={event.year}
+                onChange={(e) => updateTimelineEvent(index, 'year', e.target.value)}
+              />
+            </div>
+            <div className="col-span-9">
+              <Textarea
+                placeholder="Event description"
+                value={event.event}
+                onChange={(e) => updateTimelineEvent(index, 'event', e.target.value)}
+                rows={2}
+              />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+const UnitTypesEditor = ({ 
+  unitTypes, 
+  setUnitTypes 
+}: { 
+  unitTypes: UnitType[]
+  setUnitTypes: (types: UnitType[]) => void 
+}) => {
+  const addUnitType = () => {
+    setUnitTypes([...unitTypes, { title: '', units: [] }])
+  }
+
+  const updateUnitType = (index: number, field: keyof UnitType, value: string | string[]) => {
+    const updated = [...unitTypes]
+    if (field === 'units' && typeof value === 'string') {
+      updated[index][field] = value.split('\n').filter(line => line.trim())
+    } else {
+      updated[index][field] = value as any
+    }
+    setUnitTypes(updated)
+  }
+
+  const removeUnitType = (index: number) => {
+    setUnitTypes(unitTypes.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Unit Types</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addUnitType}>
+          <Plus className="h-4 w-4 mr-1" /> Add Unit Type
+        </Button>
+      </div>
+      {unitTypes.map((unitType, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h5 className="text-sm font-medium text-gray-700">Unit Type {index + 1}</h5>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeUnitType(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <Input
+              placeholder="Unit type title (e.g. Infantry)"
+              value={unitType.title}
+              onChange={(e) => updateUnitType(index, 'title', e.target.value)}
+            />
+            <Textarea
+              placeholder="Units list (one unit per line)"
+              value={unitType.units?.join('\n') || ''}
+              onChange={(e) => updateUnitType(index, 'units', e.target.value)}
+              rows={4}
+            />
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+const ContentBlocksEditor = ({
+  contentBlocks,
+  setContentBlocks,
+  onSelectImage,
+  currentBlockIndex,
+  setCurrentBlockIndex
+}: {
+  contentBlocks: ContentBlock[]
+  setContentBlocks: (blocks: ContentBlock[]) => void
+  onSelectImage: () => void
+  currentBlockIndex: number | null
+  setCurrentBlockIndex: (index: number | null) => void
+}) => {
+  const addContentBlock = () => {
+    const newBlock: ContentBlock = {
+      __component: "content.floating-text-image",
+      content: "",
+      image: null,
+      alt: "",
+      caption: "",
+      position: "left",
+      size: "medium",
+      alignment: "justify",
+      spacing: "medium",
+      shadow: true
+    }
+    setContentBlocks([...contentBlocks, newBlock])
+  }
+
+  const updateContentBlock = (index: number, field: keyof ContentBlock, value: any) => {
+    const updated = [...contentBlocks]
+    updated[index][field] = value
+    setContentBlocks(updated)
+  }
+
+  const removeContentBlock = (index: number) => {
+    setContentBlocks(contentBlocks.filter((_, i) => i !== index))
+  }
+
+  const selectImageFromLibrary = (index: number) => {
+    setCurrentBlockIndex(index)
+    onSelectImage()
+  }
+
+  const moveBlock = (index: number, direction: 'up' | 'down') => {
+    const newBlocks = [...contentBlocks]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+
+    if (targetIndex >= 0 && targetIndex < newBlocks.length) {
+      [newBlocks[index], newBlocks[targetIndex]] = [newBlocks[targetIndex], newBlocks[index]]
+      setContentBlocks(newBlocks)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Content Images</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addContentBlock}>
+          <Plus className="h-4 w-4 mr-1" /> Add Content Image
+        </Button>
+      </div>
+      {contentBlocks.map((block, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <div className="flex items-center gap-2">
+              <h5 className="text-sm font-medium text-gray-700">Content Image {index + 1}</h5>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => moveBlock(index, 'up')}
+                  disabled={index === 0}
+                  className="h-6 w-6 p-0"
+                >
+                  <Move className="h-3 w-3 rotate-180" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => moveBlock(index, 'down')}
+                  disabled={index === contentBlocks.length - 1}
+                  className="h-6 w-6 p-0"
+                >
+                  <Move className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeContentBlock(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left column - Text content */}
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-gray-600">Text Content</label>
+                <Textarea
+                  placeholder="Enter text content..."
+                  value={block.content}
+                  onChange={(e) => updateContentBlock(index, 'content', e.target.value)}
+                  rows={6}
+                  className="min-h-[150px] resize-y"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Position</label>
+                  <Select
+                    value={block.position}
+                    onValueChange={(value) => updateContentBlock(index, 'position', value)}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left (Float)</SelectItem>
+                      <SelectItem value="right">Right (Float)</SelectItem>
+                      <SelectItem value="center">Center</SelectItem>
+                      <SelectItem value="full-width">Full Width</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Size</label>
+                  <Select
+                    value={block.size}
+                    onValueChange={(value) => updateContentBlock(index, 'size', value)}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="small">Small</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="large">Large</SelectItem>
+                      <SelectItem value="full">Full</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Text Alignment</label>
+                  <Select
+                    value={block.alignment}
+                    onValueChange={(value) => updateContentBlock(index, 'alignment', value)}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left</SelectItem>
+                      <SelectItem value="center">Center</SelectItem>
+                      <SelectItem value="right">Right</SelectItem>
+                      <SelectItem value="justify">Justify</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Spacing</label>
+                  <Select
+                    value={block.spacing}
+                    onValueChange={(value) => updateContentBlock(index, 'spacing', value)}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="small">Small</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="large">Large</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id={`shadow-${index}`}
+                  checked={block.shadow !== false}
+                  onCheckedChange={(checked) => updateContentBlock(index, 'shadow', checked)}
+                />
+                <label htmlFor={`shadow-${index}`} className="text-xs font-medium text-gray-600">Shadow</label>
+              </div>
+            </div>
+
+            {/* Right column - Image */}
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-gray-600">Image</label>
+                <div className="relative aspect-video w-full border rounded-md overflow-hidden">
+                  {block.image?.url ? (
+                    <Image
+                      src={block.image.url}
+                      alt={block.alt || "Content image"}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <ImageIcon className="h-8 w-8 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => selectImageFromLibrary(index)}
+                >
+                  <ImageIcon className="h-4 w-4 mr-1" />
+                  Select Image
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Input
+                  placeholder="Alt text"
+                  value={block.alt || ''}
+                  onChange={(e) => updateContentBlock(index, 'alt', e.target.value)}
+                  className="h-8"
+                />
+                <Input
+                  placeholder="Caption"
+                  value={block.caption || ''}
+                  onChange={(e) => updateContentBlock(index, 'caption', e.target.value)}
+                  className="h-8"
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+const ImagesEditor = ({
+  images,
+  setImages,
+  onSelectImage,
+  currentImageIndex,
+  setCurrentImageIndex
+}: {
+  images: ImageData[]
+  setImages: (images: ImageData[]) => void
+  onSelectImage: () => void
+  currentImageIndex: number | null
+  setCurrentImageIndex: (index: number | null) => void
+}) => {
+  const addImage = () => {
+    setImages([...images, {
+      image: null,
+      alt: '',
+      caption: '',
+      description: '',
+      position: 'left',
+      size: 'medium',
+      wrapText: true,
+      spacing: 'normal'
+    }])
+  }
+
+  const updateImage = (index: number, field: keyof ImageData, value: any) => {
+    const updated = [...images]
+    updated[index][field] = value
+    setImages(updated)
+  }
+
+  const removeImage = (index: number) => {
+    setImages(images.filter((_, i) => i !== index))
+  }
+
+  const selectImageFromLibrary = (index: number) => {
+    setCurrentImageIndex(index)
+    onSelectImage()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="font-medium text-gray-700">Additional Images</h4>
+        <Button type="button" variant="outline" size="sm" onClick={addImage}>
+          <Plus className="h-4 w-4 mr-1" /> Add Image
+        </Button>
+      </div>
+      {images.map((image, index) => (
+        <Card key={index} className="p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h5 className="text-sm font-medium text-gray-700">Image {index + 1}</h5>
+            <Button type="button" variant="ghost" size="sm" onClick={() => removeImage(index)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Image URL"
+                value={image.image?.url || ''}
+                onChange={(e) => updateImage(index, 'image', { url: e.target.value })}
+                className="flex-1"
+              />
+              <Button 
+                type="button" 
+                variant="outline" 
+                size="sm" 
+                onClick={() => selectImageFromLibrary(index)}
+              >
+                <ImageIcon className="h-4 w-4" />
+              </Button>
+            </div>
+            <Input
+              placeholder="Alt text"
+              value={image.alt}
+              onChange={(e) => updateImage(index, 'alt', e.target.value)}
+            />
+            <Input
+              placeholder="Caption"
+              value={image.caption}
+              onChange={(e) => updateImage(index, 'caption', e.target.value)}
+            />
+            <Textarea
+              placeholder="Description (optional)"
+              value={image.description || ''}
+              onChange={(e) => updateImage(index, 'description', e.target.value)}
+              rows={2}
+            />
+
+            {/* Nové ovládacie prvky pre zarovnanie a veľkosť */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Position</label>
+                <Select
+                  value={image.position || 'left'}
+                  onValueChange={(value) => updateImage(index, 'position', value)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="left">Left (text wraps)</SelectItem>
+                    <SelectItem value="right">Right (text wraps)</SelectItem>
+                    <SelectItem value="center">Center</SelectItem>
+                    <SelectItem value="full">Full Width</SelectItem>
+                    <SelectItem value="side-by-side">Side by Side</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Size</label>
+                <Select
+                  value={image.size || 'medium'}
+                  onValueChange={(value) => updateImage(index, 'size', value)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="small">Small</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="large">Large</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Spacing</label>
+                <Select
+                  value={image.spacing || 'normal'}
+                  onValueChange={(value) => updateImage(index, 'spacing', value)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tight">Tight</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="wide">Wide</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={image.wrapText !== false}
+                    onCheckedChange={(checked) => updateImage(index, 'wrapText', checked)}
+                  />
+                  <span className="text-sm">Allow text wrapping</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Ak je side-by-side, umožni vybrať párový obrázok */}
+            {image.position === 'side-by-side' && (
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Pair with image</label>
+                <Select
+                  value={image.pairedWith?.toString() || ''}
+                  onValueChange={(value) => updateImage(index, 'pairedWith', value ? parseInt(value) : undefined)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select paired image" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">None</SelectItem>
+                    {images.map((_, i) => (
+                      i !== index && (
+                        <SelectItem key={i} value={i.toString()}>
+                          Image {i + 1}
+                        </SelectItem>
+                      )
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {image.image?.url && image.image.url.trim() && (
+              <div className="relative aspect-video w-full border rounded-md overflow-hidden">
+                <Image
+                  src={image.image.url}
+                  alt={image.alt}
+                  fill
+                  className="object-cover"
+                />
+              </div>
+            )}
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+export default function HistoryManager() {
+  const [articles, setArticles] = useState<Article[]>([])
+  const [isEditing, setIsEditing] = useState<number | string | null>(null)
+  const [isAddingNew, setIsAddingNew] = useState(false)
+  const [formData, setFormData] = useState<Partial<Article>>({})
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [articleToDelete, setArticleToDelete] = useState<number | string | null>(null)
+  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [currentImageField, setCurrentImageField] = useState<'coverImage' | 'heroImage' | 'mainImage'>('coverImage')
+  const [currentImageIndex, setCurrentImageIndex] = useState<number | null>(null)
+  const [imageIds, setImageIds] = useState<{
+    coverImage?: number
+    heroImage?: number  
+    mainImage?: number
+  }>({})
+  const [sections, setSections] = useState<SectionData[]>([])
+  const [images, setImages] = useState<ImageData[]>([])
+  const [keyFacts, setKeyFacts] = useState<KeyFact[]>([])
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([])
+  const [unitTypes, setUnitTypes] = useState<UnitType[]>([])
+  const [contentBlocks, setContentBlocks] = useState<ContentBlock[]>([])
+  const [richContentBlocks, setRichContentBlocks] = useState<ContentBlock[]>([])
+  const [tags, setTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
+  const [contentCursorPosition, setContentCursorPosition] = useState<number>(0)
+  const [isInsertingImageInContent, setIsInsertingImageInContent] = useState(false)
+  const [currentSectionIndex, setCurrentSectionIndex] = useState<number | null>(null)
+  const [currentBlockIndex, setCurrentBlockIndex] = useState<number | null>(null)
+  const { toast } = useToast()
+
+  const loadArticles = async () => {
+    try {
+      setIsLoading(true)
+      const response = await fetch(`${STRAPI_BASE_URL}/api/history-articles?populate=*`)
+      if (response.ok) {
+        const data = await response.json()
+        setArticles(data.data || [])
+      } else {
+        throw new Error('Failed to load articles')
+      }
+    } catch (error) {
+      console.error('Error loading articles:', error)
+      toast({
+        title: 'Error loading articles',
+        description: 'Failed to fetch articles from Strapi',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadArticles()
+  }, [])
+
+  const handleEditArticle = (article: Article) => {
+    // Normalize article data to handle Strapi media objects
+    const normalizedArticle = {
+      ...article,
+      coverImage: typeof article.coverImage === 'string' ? article.coverImage : article.coverImage?.url || '',
+      heroImage: typeof article.heroImage === 'string' ? article.heroImage : article.heroImage?.url || '',
+      mainImage: typeof article.mainImage === 'string' ? article.mainImage : article.mainImage?.url || '',
+    }
+
+    // Remove ALL legacy fields that don't exist in the current schema
+    delete normalizedArticle.seoTitle
+    delete normalizedArticle.seoDescription
+    delete normalizedArticle.metaTitle
+    delete normalizedArticle.metaDescription
+    
+    // Extract media IDs from Strapi media objects for saving
+    const mediaIds = {
+      coverImage: typeof article.coverImage === 'object' ? article.coverImage?.id : undefined,
+      heroImage: typeof article.heroImage === 'object' ? article.heroImage?.id : undefined,
+      mainImage: typeof article.mainImage === 'object' ? article.mainImage?.id : undefined,
+    }
+    
+    // Additional cleanup before setting form data
+    const cleanFormData = { ...normalizedArticle }
+    delete cleanFormData.seoTitle
+    delete cleanFormData.seoDescription
+    delete cleanFormData.metaTitle
+    delete cleanFormData.metaDescription
+    delete cleanFormData.description
+
+    setFormData(cleanFormData)
+    setImageIds(mediaIds)
+    setIsEditing(article.documentId || article.id)
+    setIsAddingNew(false)
+    
+    // Load component data
+    setSections(article.sections || [])
+    setImages(article.images || [])
+    setKeyFacts(article.keyFacts || [])
+    setTimeline(article.timeline || [])
+    setUnitTypes(article.unitTypes || [])
+    // Separate contentBlocks into regular and rich content blocks
+    const allBlocks = article.contentBlocks || []
+    const regularBlocks = allBlocks.filter(block => !block.imageBlocks)
+    const richBlocks = allBlocks.filter(block => block.imageBlocks)
+
+    setContentBlocks(regularBlocks)
+    setRichContentBlocks(richBlocks)
+    setTags(article.tags || [])
+  }
+
+  const handleAddNew = () => {
+    setFormData({
+      title: "",
+      subtitle: "",
+      excerpt: "",
+      content: "",
+      category: "Historical Research",
+      author: "SCEAR",
+      articleType: "standard",
+      featured: false,
+      visible: true,
+      readingTime: 5,
+    })
+    setIsEditing(null)
+    setIsAddingNew(true)
+    
+    // Reset component data
+    setSections([])
+    setImages([])
+    setKeyFacts([])
+    setTimeline([])
+    setUnitTypes([])
+    setContentBlocks([])
+    setRichContentBlocks([])
+    setTags([])
+    setImageIds({})
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditing(null)
+    setIsAddingNew(false)
+    setFormData({})
+    setSections([])
+    setImages([])
+    setKeyFacts([])
+    setTimeline([])
+    setUnitTypes([])
+    setContentBlocks([])
+    setRichContentBlocks([])
+    setTags([])
+    setImageIds({})
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target
+    setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleCheckboxChange = (name: string, checked: boolean) => {
+    setFormData((prev) => ({ ...prev, [name]: checked }))
+  }
+
+  const handleImageSelect = (imageUrl: string, mediaId?: number) => {
+    if (isInsertingImageInContent) {
+      // Add image to Additional Images instead of inserting into content
+      const newImage = {
+        image: { url: imageUrl, id: mediaId },
+        alt: "Image",
+        caption: "Image",
+        description: ""
+      }
+      setImages([...images, newImage])
+      setIsInsertingImageInContent(false)
+      setCurrentSectionIndex(null)
+      
+      // Show toast notification
+      toast({
+        title: "Image added",
+        description: "Image has been added to Additional Images. You can edit its details below.",
+      })
+    } else if (currentImageIndex !== null) {
+      // Handle images array
+      const updatedImages = [...images]
+      updatedImages[currentImageIndex].image = { url: imageUrl, id: mediaId }
+      setImages(updatedImages)
+      setCurrentImageIndex(null)
+    } else if (currentBlockIndex !== null) {
+      // Handle content blocks
+      const updatedBlocks = [...contentBlocks]
+      updatedBlocks[currentBlockIndex].image = { url: imageUrl, id: mediaId }
+      setContentBlocks(updatedBlocks)
+      setCurrentBlockIndex(null)
+    } else {
+      // Handle regular image fields
+      setFormData((prev) => ({ ...prev, [currentImageField]: imageUrl }))
+      if (mediaId) {
+        setImageIds(prev => ({ ...prev, [currentImageField]: mediaId }))
+      }
+    }
+    setIsMediaLibraryOpen(false)
+  }
+
+  const handleArticleTypeSelect = (articleType: ArticleType) => {
+    setFormData((prev) => ({ ...prev, articleType }))
+  }
+
+  const addTag = () => {
+    if (tagInput.trim() && !tags.includes(tagInput.trim())) {
+      setTags([...tags, tagInput.trim()])
+      setTagInput('')
+    }
+  }
+
+  const removeTag = (tagToRemove: string) => {
+    setTags(tags.filter(tag => tag !== tagToRemove))
+  }
+
+  const generateSlug = (title: string): string => {
+    return title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+      .substring(0, 100) // Limit length
+      || 'untitled-article' // Fallback if empty
+  }
+
+  const handleSaveArticle = async () => {
+    if (!formData.title || !formData.content || !formData.author) {
+      toast({ title: "Missing required information", variant: "destructive" })
+      return
+    }
+
+    // Generate slug from title
+    const slug = formData.slug || generateSlug(formData.title)
+    
+    // ULTRA CLEAN: Create article data with ONLY explicitly allowed schema fields
+    const cleanArticleData: Record<string, any> = {}
+
+    // Core required fields
+    cleanArticleData.title = formData.title
+    cleanArticleData.mainContent = formData.content
+    cleanArticleData.slug = slug
+    cleanArticleData.category = formData.category || "Historical Research"
+    cleanArticleData.author = formData.author
+
+    // Optional fields (only add if they exist and are in backend schema)
+    if (formData.featured !== undefined) cleanArticleData.featured = formData.featured
+    else cleanArticleData.featured = false
+
+    // Map readingTime to readTime (backend field name)
+    if (formData.readingTime) cleanArticleData.readTime = parseInt(formData.readingTime)
+    else cleanArticleData.readTime = 5
+
+    if (formData.intro) cleanArticleData.intro = formData.intro
+    else cleanArticleData.intro = formData.excerpt || formData.title
+
+    // Add required description field (max 500 chars) - ensure it's never null/undefined
+    if (formData.excerpt && formData.excerpt.trim()) {
+      cleanArticleData.description = formData.excerpt.substring(0, 500)
+    } else if (formData.subtitle && formData.subtitle.trim()) {
+      cleanArticleData.description = formData.subtitle.substring(0, 500)
+    } else if (formData.title) {
+      cleanArticleData.description = formData.title.substring(0, 500)
+    } else {
+      cleanArticleData.description = "Historical article"
+    }
+
+    // Add publishedDate if not set
+    if (!cleanArticleData.publishedDate) {
+      cleanArticleData.publishedDate = new Date().toISOString().split('T')[0]
+    }
+    
+    // Explicitly ensure we don't send system fields that Strapi manages or legacy fields
+    delete cleanArticleData.id
+    delete cleanArticleData.documentId
+    delete cleanArticleData.createdAt
+    delete cleanArticleData.updatedAt
+    delete cleanArticleData.publishedAt
+    // Remove ALL legacy fields that might exist in old articles
+    delete cleanArticleData.seoTitle
+    delete cleanArticleData.seoDescription
+    delete cleanArticleData.metaTitle
+    delete cleanArticleData.metaDescription
+    // DO NOT DELETE description - it's a required field in the backend!
+    
+    // Helper function to recursively remove id fields from nested objects/arrays
+    const removeIdFields = (obj: any): any => {
+      if (Array.isArray(obj)) {
+        return obj.map(item => removeIdFields(item))
+      } else if (obj && typeof obj === 'object') {
+        const cleaned = { ...obj }
+        delete cleaned.id
+        delete cleaned.documentId
+        delete cleaned.createdAt
+        delete cleaned.updatedAt
+        delete cleaned.publishedAt
+        
+        // Recursively clean nested objects
+        Object.keys(cleaned).forEach(key => {
+          cleaned[key] = removeIdFields(cleaned[key])
+        })
+        return cleaned
+      }
+      return obj
+    }
+
+    // Add image IDs if they exist (now supported by updated backend schema)
+    if (imageIds.heroImage) {
+      cleanArticleData.heroImage = imageIds.heroImage
+    }
+    if (imageIds.coverImage) {
+      cleanArticleData.coverImage = imageIds.coverImage
+    }
+    if (imageIds.mainImage) {
+      cleanArticleData.mainImage = imageIds.mainImage
+    }
+
+    // Add tags only if not empty
+    if (tags.length > 0) {
+      cleanArticleData.tags = tags
+    }
+
+    // Add complex components only if they have content, and clean them of ID fields
+    if (sections.length > 0 && sections.some(s => s.title.trim() || s.content.trim())) {
+      cleanArticleData.sections = removeIdFields(sections.filter(s => s.title.trim() || s.content.trim()))
+    }
+
+    if (keyFacts.length > 0 && keyFacts.some(f => f.title.trim() || f.description.trim())) {
+      cleanArticleData.keyFacts = removeIdFields(keyFacts.filter(f => f.title.trim() || f.description.trim()))
+    }
+
+    if (timeline.length > 0 && timeline.some(t => t.year.trim() || t.event.trim())) {
+      cleanArticleData.timeline = removeIdFields(timeline.filter(t => t.year.trim() || t.event.trim()))
+    }
+
+    if (unitTypes.length > 0 && unitTypes.some(u => u.title.trim() || (u.units && u.units.length > 0))) {
+      cleanArticleData.unitTypes = removeIdFields(unitTypes.filter(u => u.title.trim() || (u.units && u.units.length > 0)))
+    }
+
+    // Process images with new properties
+    if (images.length > 0 && images.some(img => img.image && (img.image.id || img.image.url))) {
+      const cleanImages = images.filter(img => img.image && (img.image.id || img.image.url)).map(img => ({
+        image: img.image.id || img.image, // Send media ID if available, otherwise whole object
+        alt: img.alt,
+        caption: img.caption,
+        description: img.description,
+        position: img.position,
+        size: img.size,
+        wrapText: img.wrapText,
+        pairedWith: img.pairedWith,
+        spacing: img.spacing
+      }))
+      cleanArticleData.images = removeIdFields(cleanImages)
+    }
+
+    // Add content blocks if they exist
+    if (contentBlocks.length > 0 && contentBlocks.some(block => block.content.trim() || (block.image && block.image.id))) {
+      const cleanContentBlocks = contentBlocks
+        .filter(block => block.content.trim() || (block.image && block.image.id))
+        .map(block => {
+          const cleanBlock = {
+            __component: block.__component,
+            content: block.content,
+            alt: block.alt || '',
+            caption: block.caption || '',
+            position: block.position || 'left',
+            size: block.size || 'medium',
+            alignment: block.alignment || 'justify',
+            spacing: block.spacing || 'medium',
+            shadow: block.shadow !== false
+          };
+
+          // Add image field - try multiple approaches
+          if (block.image && block.image.id) {
+            cleanBlock.image = block.image.id;
+            cleanBlock.image_id = block.image.id; // Also try image_id field
+            console.log('🖼️ Setting image:', block.image.id);
+          }
+
+          return cleanBlock;
+        })
+
+      // Apply removeIdFields but preserve the image and image_id fields
+      cleanArticleData.contentBlocks = cleanContentBlocks.map(block => {
+        const cleaned = removeIdFields(block);
+        // Restore image field if it was a number (media ID)
+        if (block.image && typeof block.image === 'number') {
+          cleaned.image = block.image;
+        }
+        // Also preserve image_id field
+        if (block.image_id && typeof block.image_id === 'number') {
+          cleaned.image_id = block.image_id;
+        }
+        return cleaned;
+      });
+    }
+
+
+    try {
+      console.log('FormData contains:', Object.keys(formData))
+      console.log('Sending article data:', JSON.stringify(cleanArticleData, null, 2))
+      console.log('CleanArticleData keys:', Object.keys(cleanArticleData))
+      
+      let response
+      if (isAddingNew) {
+        // Generate unique slug if needed
+        if (!cleanArticleData.slug || cleanArticleData.slug.trim() === '') {
+          cleanArticleData.slug = cleanArticleData.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '') + '-' + Date.now()
+        }
+
+        console.log('✅ Creating new article with form data')
+        const requestPayload = { data: cleanArticleData }
+        console.log('✅ REQUEST PAYLOAD:', JSON.stringify(requestPayload, null, 2))
+
+        response = await fetch(`${STRAPI_BASE_URL}/api/history-articles`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestPayload)
+        })
+      } else if (isEditing) {
+        const endpoint = `${STRAPI_BASE_URL}/api/history-articles/${isEditing}`
+
+        console.log('✅ Updating article with ALL form data')
+        const requestPayload = { data: cleanArticleData }
+        console.log('✅ UPDATE REQUEST PAYLOAD:', JSON.stringify(requestPayload, null, 2))
+
+        response = await fetch(endpoint, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestPayload)
+        })
+      }
+
+      if (response?.ok) {
+        const result = await response.json()
+        console.log('Article saved successfully:', result)
+        toast({ title: isAddingNew ? "Article created successfully!" : "Article updated successfully!" })
+        await loadArticles()
+        handleCancelEdit()
+      } else {
+        const errorText = await response?.text()
+        throw new Error(`Failed to save article: ${response?.status} ${errorText}`)
+      }
+    } catch (error) {
+      // Handle specific slug uniqueness error
+      if (error instanceof Error && error.message.includes('This attribute must be unique') && error.message.includes('slug')) {
+        toast({
+          title: 'Slug must be unique',
+          description: `The slug "${slug}" already exists. Please change the title or manually set a different slug.`,
+          variant: 'destructive'
+        })
+      } else {
+        console.error('Error saving article:', error)
+        toast({
+          title: 'Error saving article',
+          description: error instanceof Error ? error.message : 'Failed to save article to Strapi',
+          variant: 'destructive'
+        })
+      }
+    }
+  }
+
+  const confirmDelete = (article: Article) => {
+    setArticleToDelete(article.documentId || article.id)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteArticle = async () => {
+    if (!articleToDelete) return
+
+    try {
+      const response = await fetch(`${STRAPI_BASE_URL}/api/history-articles/${articleToDelete}`, {
+        method: 'DELETE',
+      })
+
+      if (response.ok) {
+        toast({ title: "Article deleted" })
+        await loadArticles()
+      } else {
+        throw new Error('Failed to delete article')
+      }
+    } catch (error) {
+      console.error('Error deleting article:', error)
+      toast({
+        title: 'Error deleting article',
+        description: 'Failed to delete article from Strapi',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsDeleteDialogOpen(false)
+      setArticleToDelete(null)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 p-6 bg-white min-h-screen">
+        <div className="flex items-center justify-center h-64">
+          <div className="h-8 w-8 border-4 border-red-800 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 p-6 bg-white min-h-screen">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900">Manage History Articles</h2>
+        <Button onClick={handleAddNew} className="bg-red-800 hover:bg-red-900">
+          <Plus className="mr-2 h-4 w-4" /> Add New Article
+        </Button>
+      </div>
+
+      {(isEditing || isAddingNew) && (
+        <Card className="mb-8 bg-white border border-gray-200 shadow-sm">
+          <CardHeader className="bg-gray-50 border-b border-gray-200">
+            <CardTitle className="text-gray-900">{isAddingNew ? "Add New Article" : "Edit Article"}</CardTitle>
+          </CardHeader>
+          <CardContent className="bg-white space-y-6 p-6">
+            {/* Article Type Selection */}
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-gray-700">Article Type</label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <ArticleTypeCard
+                  value="standard"
+                  label="Standard"
+                  description="Simple article with text and images"
+                  icon={Layout}
+                  isSelected={formData.articleType === "standard"}
+                  onSelect={handleArticleTypeSelect}
+                />
+                <ArticleTypeCard
+                  value="auxiliary-forces"
+                  label="Auxiliary Forces"
+                  description="Complex layout with unit types and key facts"
+                  icon={AlignLeft}
+                  isSelected={formData.articleType === "auxiliary-forces"}
+                  onSelect={handleArticleTypeSelect}
+                />
+                <ArticleTypeCard
+                  value="legion-timeline"
+                  label="Legion Timeline"
+                  description="Historical timeline with key events"
+                  icon={Star}
+                  isSelected={formData.articleType === "legion-timeline"}
+                  onSelect={handleArticleTypeSelect}
+                />
+              </div>
+            </div>
+
+            {/* Basic Information */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="title" className="text-sm font-medium text-gray-700">Title *</label>
+                <Input 
+                  id="title" 
+                  name="title" 
+                  value={formData.title || ""} 
+                  onChange={handleInputChange} 
+                  className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500" 
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="subtitle" className="text-sm font-medium text-gray-700">Subtitle</label>
+                <Input 
+                  id="subtitle" 
+                  name="subtitle" 
+                  value={formData.subtitle || ""} 
+                  onChange={handleInputChange} 
+                  className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500" 
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="slug" className="text-sm font-medium text-gray-700">URL Slug</label>
+              <Input 
+                id="slug" 
+                name="slug" 
+                value={formData.slug || (formData.title ? generateSlug(formData.title) : '')} 
+                onChange={handleInputChange}
+                placeholder="auto-generated-from-title" 
+                className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500" 
+              />
+              <p className="text-xs text-gray-500">Auto-generated from title. Edit if needed for SEO.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="category" className="text-sm font-medium text-gray-700">Category *</label>
+                <Select value={formData.category} onValueChange={(value) => handleSelectChange('category', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Historical Research">Historical Research</SelectItem>
+                    <SelectItem value="Military History">Military History</SelectItem>
+                    <SelectItem value="Culture & Society">Culture & Society</SelectItem>
+                    <SelectItem value="Archaeological Finds">Archaeological Finds</SelectItem>
+                    <SelectItem value="Reenactment Guides">Reenactment Guides</SelectItem>
+                    <SelectItem value="Equipment & Arms">Equipment & Arms</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="author" className="text-sm font-medium text-gray-700">Author *</label>
+                <Input 
+                  id="author" 
+                  name="author" 
+                  value={formData.author || ""} 
+                  onChange={handleInputChange} 
+                  className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500" 
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="excerpt" className="text-sm font-medium text-gray-700">Excerpt/Summary</label>
+              <Textarea
+                id="excerpt"
+                name="excerpt"
+                value={formData.excerpt || ""}
+                onChange={handleInputChange}
+                rows={2}
+                className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="intro" className="text-sm font-medium text-gray-700">
+                Introduction 
+                <span className="text-xs text-gray-500 ml-2">
+                  ({(formData.intro || "").length}/2000 characters)
+                </span>
+              </label>
+              <Textarea
+                id="intro"
+                name="intro"
+                value={formData.intro || ""}
+                onChange={handleInputChange}
+                rows={3}
+                maxLength={2000}
+                className={`bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500 ${
+                  (formData.intro || "").length > 2000 ? 'border-red-500 focus:border-red-600' : ''
+                }`}
+                placeholder="Opening paragraph with drop cap styling (max 2000 characters)"
+              />
+              {(formData.intro || "").length > 2000 && (
+                <p className="text-xs text-red-600">Introduction is too long. Please reduce to 2000 characters or less.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label htmlFor="content" className="text-sm font-medium text-gray-700">Content *</label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const textarea = document.getElementById('content') as HTMLTextAreaElement
+                    if (textarea) {
+                      setContentCursorPosition(textarea.selectionStart)
+                    }
+                    setIsInsertingImageInContent(true)
+                    setIsMediaLibraryOpen(true)
+                  }}
+                >
+                  <ImageIcon className="h-4 w-4 mr-1" />
+                  Add to Gallery
+                </Button>
+              </div>
+              <Textarea
+                id="content"
+                name="content"
+                value={formData.content || ""}
+                onChange={handleInputChange}
+                onSelect={(e) => setContentCursorPosition((e.target as HTMLTextAreaElement).selectionStart)}
+                rows={12}
+                className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500 min-h-[300px] resize-y"
+                placeholder="Write your article content here. You can insert images using the button above."
+              />
+              <p className="text-xs text-gray-500">
+                Use Markdown syntax for formatting. Click "Add to Gallery" to add images to the Additional Images section below.
+              </p>
+            </div>
+
+            {/* Images */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Cover Image</label>
+                <div className="relative aspect-video w-full border rounded-md overflow-hidden">
+                  {formData.coverImage && formData.coverImage.trim() ? (
+                    <Image
+                      src={formData.coverImage}
+                      alt="Cover"
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <ImageIcon className="h-12 w-12 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setCurrentImageField('coverImage')
+                    setIsMediaLibraryOpen(true)
+                  }}
+                >
+                  Select Cover Image
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Hero Image</label>
+                <div className="relative aspect-video w-full border rounded-md overflow-hidden">
+                  {formData.heroImage && formData.heroImage.trim() ? (
+                    <Image
+                      src={formData.heroImage}
+                      alt="Hero"
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <ImageIcon className="h-12 w-12 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setCurrentImageField('heroImage')
+                    setIsMediaLibraryOpen(true)
+                  }}
+                >
+                  Select Hero Image
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Main Image</label>
+                <div className="relative aspect-video w-full border rounded-md overflow-hidden">
+                  {formData.mainImage && formData.mainImage.trim() ? (
+                    <Image
+                      src={formData.mainImage}
+                      alt="Main"
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <ImageIcon className="h-12 w-12 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setCurrentImageField('mainImage')
+                    setIsMediaLibraryOpen(true)
+                  }}
+                >
+                  Select Main Image
+                </Button>
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Tags</label>
+              <div className="flex gap-2 mb-2">
+                <Input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  placeholder="Add a tag"
+                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                />
+                <Button type="button" variant="outline" onClick={addTag}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag, index) => (
+                  <div key={index} className="bg-red-100 text-red-800 px-2 py-1 rounded-md text-sm flex items-center gap-1">
+                    {tag}
+                    <button type="button" onClick={() => removeTag(tag)} className="hover:text-red-600">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Complex Components for Non-Standard Article Types */}
+            {formData.articleType !== 'standard' && (
+              <div className="space-y-6">
+                <SectionEditor 
+                  sections={sections} 
+                  setSections={setSections}
+                  setContentCursorPosition={setContentCursorPosition}
+                  setCurrentSectionIndex={setCurrentSectionIndex}
+                  setIsInsertingImageInContent={setIsInsertingImageInContent}
+                  setIsMediaLibraryOpen={setIsMediaLibraryOpen}
+                />
+                
+                {/* Key Facts - available for all non-standard article types */}
+                <KeyFactsEditor keyFacts={keyFacts} setKeyFacts={setKeyFacts} />
+                
+                {formData.articleType === 'auxiliary-forces' && (
+                  <UnitTypesEditor unitTypes={unitTypes} setUnitTypes={setUnitTypes} />
+                )}
+                
+                {formData.articleType === 'legion-timeline' && (
+                  <TimelineEditor timeline={timeline} setTimeline={setTimeline} />
+                )}
+              </div>
+            )}
+
+            {/* Content Blocks Editor - available for all article types */}
+            <div className="space-y-6">
+              <ContentBlocksEditor
+                contentBlocks={contentBlocks}
+                setContentBlocks={setContentBlocks}
+                onSelectImage={() => setIsMediaLibraryOpen(true)}
+                currentBlockIndex={currentBlockIndex}
+                setCurrentBlockIndex={setCurrentBlockIndex}
+              />
+            </div>
+
+            {/* Rich Content Block Editor - NEW and WORKING! */}
+            <div className="space-y-6">
+            </div>
+
+            {/* Images Editor - legacy, available for all article types */}
+            <div className="space-y-6">
+              <ImagesEditor
+                images={images}
+                setImages={setImages}
+                onSelectImage={() => setIsMediaLibraryOpen(true)}
+                currentImageIndex={currentImageIndex}
+                setCurrentImageIndex={setCurrentImageIndex}
+              />
+            </div>
+
+            {/* Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="readingTime" className="text-sm font-medium text-gray-700">Reading Time (minutes)</label>
+                <Input
+                  id="readingTime"
+                  name="readingTime"
+                  type="number"
+                  value={formData.readingTime || 5}
+                  onChange={handleInputChange}
+                  className="bg-white border-gray-300 text-gray-900 focus:border-red-500 focus:ring-red-500"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="featured"
+                    checked={formData.featured || false}
+                    onCheckedChange={(checked) => handleCheckboxChange('featured', checked as boolean)}
+                  />
+                  <label htmlFor="featured" className="text-sm font-medium text-gray-700">Featured Article</label>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="visible"
+                    checked={formData.visible !== false}
+                    onCheckedChange={(checked) => handleCheckboxChange('visible', checked as boolean)}
+                  />
+                  <label htmlFor="visible" className="text-sm font-medium text-gray-700">Visible</label>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="flex justify-between bg-white border-t border-gray-200">
+            <Button variant="outline" onClick={handleCancelEdit} className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50">
+              <X className="mr-2 h-4 w-4" /> Cancel
+            </Button>
+            <Button className="bg-red-800 hover:bg-red-900" onClick={handleSaveArticle}>
+              <Save className="mr-2 h-4 w-4" /> Save Article
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
+      {/* Articles List */}
+      <div className="space-y-4">
+        {articles.length === 0 ? (
+          <Card className="p-8 text-center">
+            <BookOpen className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+            <p className="text-gray-600">No articles found. Create your first article!</p>
+          </Card>
+        ) : (
+          articles.map((article) => (
+            <Card key={article.documentId || article.id} className="overflow-hidden bg-white border border-gray-200 shadow-sm">
+              <div className="flex flex-col md:flex-row">
+                <div className="md:w-1/4 relative h-48 md:h-auto">
+                  {(article.coverImage && (typeof article.coverImage === 'string' ? article.coverImage.trim() : article.coverImage.url)) || 
+                   (article.heroImage && (typeof article.heroImage === 'string' ? article.heroImage.trim() : article.heroImage.url)) ? (
+                    <Image 
+                      src={(typeof article.coverImage === 'string' ? article.coverImage : article.coverImage?.url) || 
+                           (typeof article.heroImage === 'string' ? article.heroImage : article.heroImage?.url) || 
+                           "/images/gallery/roman-battle-formation.png"} 
+                      alt={article.title} 
+                      fill 
+                      className="object-cover" 
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full bg-gray-100">
+                      <BookOpen className="h-12 w-12 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <div className="md:w-3/4 p-4 bg-white">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-lg text-gray-900">{article.title}</h3>
+                    <div className="flex items-center gap-2">
+                      {article.featured && (
+                        <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                      )}
+                      <span className={`px-2 py-1 text-xs rounded ${article.articleType === 'standard' ? 'bg-gray-100 text-gray-600' : 
+                        article.articleType === 'auxiliary-forces' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`}>
+                        {article.articleType}
+                      </span>
+                    </div>
+                  </div>
+                  {article.subtitle && (
+                    <p className="text-gray-600 text-sm mb-2">{article.subtitle}</p>
+                  )}
+                  <p className="text-gray-700 mb-4 line-clamp-2">{article.excerpt || (article.content ? article.content.substring(0, 150) + '...' : 'No content available')}</p>
+                  <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
+                    <div className="flex items-center gap-1">
+                      <User className="h-4 w-4" />
+                      {article.author}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Clock className="h-4 w-4" />
+                      {article.readingTime || 5} min read
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Tag className="h-4 w-4" />
+                      {article.category}
+                    </div>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button variant="outline" size="sm" onClick={() => handleEditArticle(article)} className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50">
+                      <Pencil className="h-4 w-4 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 bg-white border-gray-300 hover:bg-red-50"
+                      onClick={() => confirmDelete(article)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" /> Delete
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="bg-white border border-gray-200">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">Confirm Deletion</DialogTitle>
+          </DialogHeader>
+          <p className="text-gray-600">Are you sure you want to delete this article? This action cannot be undone.</p>
+          <DialogFooter className="bg-white">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50">
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteArticle}>
+              Delete Article
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Media Library */}
+      <MediaLibrary open={isMediaLibraryOpen} onOpenChange={setIsMediaLibraryOpen} onSelectImage={handleImageSelect} />
+    </div>
+  )
+}

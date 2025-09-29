@@ -1,0 +1,1831 @@
+// Dynamic Strapi URL based on environment
+const STRAPI_BASE_URL = process.env.NEXT_PUBLIC_STRAPI_API_URL || (
+  process.env.NODE_ENV === 'production' 
+    ? 'https://api.autoweb.store'  // Production domain with SSL
+    : 'http://localhost:1341'   // Local development (corrected port)
+);
+
+// Events API Types
+export type StrapiEvent = {
+  id: number;
+  documentId: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress: string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  category: 'reenactment' | 'training' | 'exhibition' | 'workshop' | 'meeting';
+  recurring: boolean;
+  featured: boolean;
+  sortOrder: number;
+  photo?: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string;
+};
+
+export type EventData = {
+  id: number;
+  documentId?: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  location: {
+    name: string;
+    address: string;
+    coordinates: [number, number]; // [latitude, longitude]
+  };
+  category: 'reenactment' | 'training' | 'exhibition' | 'workshop' | 'meeting';
+  recurring?: boolean;
+  featured?: boolean;
+  image?: string; // URL string for the image
+};
+
+export type StrapiGalleryPhoto = {
+  id: number;
+  documentId: string;
+  title: string;
+  alt: string;
+  description?: string;
+  location?: string;
+  activity?: string;
+  category: string;
+  featured: boolean;
+  sortOrder: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  aspectRatio?: string;
+  exifData?: any;
+  photographDate?: string;
+  photographer?: string;
+  photo: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string;
+};
+
+export type GalleryImage = {
+  id: number;
+  documentId: string;
+  src: string;
+  alt: string;
+  location: string;
+  activity: string;
+  category: string;
+  featured?: boolean;
+  width?: number;
+  height?: number;
+};
+
+export async function fetchGalleryPhotos(): Promise<GalleryImage[]> {
+  try {
+    const response = await fetch(
+      `${STRAPI_BASE_URL}/api/gallery-photos?populate=photo&sort=sortOrder:asc,createdAt:desc`,
+      {
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(`Gallery Photos API error: ${response.status} - using fallback data`);
+      // Return fallback gallery data when API fails
+      return [
+        {
+          id: 1,
+          src: '/images/gallery/roman-training.png',
+          alt: 'Roman military training session',
+          location: 'Bratislava',
+          activity: 'Training Session',
+          category: 'Training',
+          featured: true,
+          width: 800,
+          height: 600,
+        },
+        {
+          id: 2,
+          src: '/images/gallery/roman-camp.png', 
+          alt: 'Roman military camp setup',
+          location: 'Trnava',
+          activity: 'Military Camp',
+          category: 'Camps',
+          featured: false,
+          width: 800,
+          height: 600,
+        },
+        {
+          id: 3,
+          src: '/images/gallery/roman-festival.png',
+          alt: 'Roman festival reenactment',
+          location: 'Košice',
+          activity: 'Festival Reenactment', 
+          category: 'Reenactments',
+          featured: true,
+          width: 800,
+          height: 600,
+        },
+      ];
+    }
+
+    const data = await response.json();
+    
+    return data.data.map((item: StrapiGalleryPhoto): GalleryImage => ({
+      id: item.id,
+      documentId: item.documentId,
+      src: item.photo?.url ? (
+        item.photo.url.startsWith('http') ? 
+          // Force high quality for Cloudinary URLs
+          item.photo.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.photo.url}`
+      ) : '/placeholder.svg',
+      alt: item.alt || item.title,
+      location: item.location || '',
+      activity: item.activity || item.description || '',
+      category: item.category,
+      featured: item.featured,
+      width: item.photo?.width || item.originalWidth,
+      height: item.photo?.height || item.originalHeight,
+    })).filter(item => item.src !== '/placeholder.svg'); // Remove items without photos
+  } catch (error) {
+    console.error('Error fetching gallery photos:', error);
+    // Production fallback data
+    return [
+      {
+        id: 1,
+        src: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/roman-training-sample.jpg',
+        alt: 'Roman Military Training',
+        location: 'Bratislava',
+        activity: 'Formation Training',
+        category: 'Training',
+        featured: true,
+        width: 800,
+        height: 600,
+      },
+      {
+        id: 2,
+        src: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/roman-equipment-sample.jpg',
+        alt: 'Roman Equipment Display',
+        location: 'Trnava', 
+        activity: 'Equipment Showcase',
+        category: 'Equipment',
+        featured: false,
+        width: 800,
+        height: 600,
+      },
+      {
+        id: 3,
+        src: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/roman-reenactment-sample.jpg',
+        alt: 'Historical Reenactment',
+        location: 'Košice',
+        activity: 'Battle Recreation', 
+        category: 'Reenactments',
+        featured: true,
+        width: 800,
+        height: 600,
+      }
+    ];
+  }
+}
+
+export async function fetchGalleryCategories(): Promise<string[]> {
+  try {
+    const photos = await fetchGalleryPhotos();
+    if (photos.length === 0) {
+      return ['All', 'Equipment', 'Training', 'Military', 'Reenactments', 'Festivals', 'Culture', 'Camps'];
+    }
+    const categories = [...new Set(photos.map(photo => photo.category))];
+    return ['All', ...categories.sort()];
+  } catch (error) {
+    console.error('Error fetching gallery categories:', error);
+    return ['All', 'Equipment', 'Training', 'Military', 'Reenactments', 'Festivals', 'Culture', 'Camps'];
+  }
+}
+
+export async function uploadGalleryPhoto(photoData: {
+  file: File;
+  title: string;
+  alt: string;
+  description?: string;
+  location?: string;
+  activity?: string;
+  category: string;
+  featured: boolean;
+}): Promise<StrapiGalleryPhoto | null> {
+  try {
+    // Step 1: Upload the file using RAW UPLOAD (prevents auto-rotation)
+    const fileFormData = new FormData();
+    fileFormData.append('files', photoData.file);
+
+    console.log('🔥 RAW UPLOAD: Using raw-upload endpoint to prevent rotation...');
+    const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+      method: 'POST',
+      body: fileFormData,
+    });
+
+    if (!fileResponse.ok) {
+      throw new Error(`File upload failed! status: ${fileResponse.status}`);
+    }
+
+    const uploadedFiles = await fileResponse.json();
+    console.log('File uploaded:', uploadedFiles);
+    
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      throw new Error('No files were uploaded');
+    }
+
+    const uploadedFile = uploadedFiles[0];
+
+    // Step 2: Create gallery photo entry with the uploaded file ID
+    const galleryData = {
+      data: {
+        title: photoData.title,
+        alt: photoData.alt,
+        description: photoData.description,
+        location: photoData.location,
+        activity: photoData.activity,
+        category: photoData.category,
+        featured: photoData.featured,
+        sortOrder: 0,
+        photo: uploadedFile.id, // Link to the uploaded file
+      }
+    };
+
+    console.log('Creating gallery photo entry:', galleryData);
+    const galleryResponse = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(galleryData),
+    });
+
+    if (!galleryResponse.ok) {
+      throw new Error(`Gallery photo creation failed! status: ${galleryResponse.status}`);
+    }
+
+    const galleryResult = await galleryResponse.json();
+    console.log('Gallery photo created:', galleryResult);
+    return galleryResult.data;
+  } catch (error) {
+    console.error('Error uploading gallery photo:', error);
+    return null;
+  }
+}
+
+export async function uploadEventPhoto(photoData: {
+  file: File;
+  title: string;
+  description?: string;
+}): Promise<any | null> {
+  try {
+    // Step 1: Upload the file using RAW UPLOAD (prevents auto-rotation)
+    const fileFormData = new FormData();
+    fileFormData.append('files', photoData.file);
+
+    console.log('🔥 RAW UPLOAD: Using raw-upload endpoint to prevent rotation...');
+    const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+      method: 'POST',
+      body: fileFormData,
+    });
+
+    if (!fileResponse.ok) {
+      throw new Error(`File upload failed! status: ${fileResponse.status}`);
+    }
+
+    const uploadedFiles = await fileResponse.json();
+    console.log('Event image uploaded:', uploadedFiles);
+    
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      throw new Error('No files were uploaded');
+    }
+
+    return uploadedFiles[0];
+  } catch (error) {
+    console.error('Error uploading event photo:', error);
+    return null;
+  }
+}
+
+export async function deleteGalleryPhoto(photoId: number | string): Promise<boolean> {
+  try {
+    console.log('🗑️ Deleting gallery photo:', photoId);
+
+    // Try with the provided photoId first (could be documentId or numeric id)
+    let response = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos/${photoId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    // If 404 and photoId is a documentId (string), try to find numeric id
+    if (response.status === 404 && typeof photoId === 'string') {
+      console.log('🔄 Retrying delete with numeric ID lookup...');
+
+      // Fetch all gallery photos to find the numeric ID for this documentId
+      const fetchResponse = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos?populate=*`);
+      if (fetchResponse.ok) {
+        const data = await fetchResponse.json();
+        const photo = data.data.find((item: any) => item.documentId === photoId);
+
+        if (photo && photo.id) {
+          console.log(`🎯 Found numeric ID ${photo.id} for documentId ${photoId}`);
+          // Retry delete with numeric ID
+          response = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos/${photo.id}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        }
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`Delete failed! status: ${response.status}`);
+    }
+
+    console.log('✅ Gallery photo deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Error deleting gallery photo:', error);
+    return false;
+  }
+}
+
+export async function updateGalleryPhoto(photoId: number | string, updateData: Partial<{
+  title: string;
+  alt: string;
+  description?: string;
+  location?: string;
+  activity?: string;
+  category: string;
+  featured: boolean;
+}>): Promise<StrapiGalleryPhoto | null> {
+  try {
+    console.log('📝 Updating gallery photo:', photoId, updateData);
+
+    // Try with the provided photoId first (could be documentId or numeric id)
+    let response = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos/${photoId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: updateData }),
+    });
+
+    // If 404, try different approaches to find the correct ID
+    if (response.status === 404) {
+      console.log('🔄 Retrying update with ID lookup...');
+
+      // Fetch all gallery photos to find the correct ID
+      const fetchResponse = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos?populate=*`);
+      if (fetchResponse.ok) {
+        const data = await fetchResponse.json();
+        let photo;
+
+        if (typeof photoId === 'string') {
+          // If photoId is string, find by documentId
+          photo = data.data.find((item: any) => item.documentId === photoId);
+        } else {
+          // If photoId is number, find by id (maybe the data is not fresh yet)
+          photo = data.data.find((item: any) => item.id === photoId);
+        }
+
+        if (photo && photo.id) {
+          console.log(`🎯 Found photo with ID ${photo.id} for requested ${photoId}`);
+          // Retry update with found ID
+          response = await fetch(`${STRAPI_BASE_URL}/api/gallery-photos/${photo.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ data: updateData }),
+          });
+        } else {
+          console.log('❌ Photo not found in Strapi data');
+        }
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`Update failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Gallery photo updated successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error updating gallery photo:', error);
+    return null;
+  }
+}
+
+// Events API Functions
+export async function fetchEvents(): Promise<EventData[]> {
+  try {
+    const response = await fetch(
+      `${STRAPI_BASE_URL}/api/events?populate=*`,
+      {
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    return data.data.map((item: StrapiEvent): EventData => ({
+      id: item.id,
+      documentId: item.documentId,
+      title: item.title || 'Untitled Event',
+      description: item.description || 'No description available',
+      startDate: item.startDate || new Date().toISOString(),
+      endDate: item.endDate || new Date().toISOString(),
+      location: {
+        name: item.locationName || 'Unknown Location',
+        address: item.locationAddress || '',
+        coordinates: item.coordinates ? [item.coordinates.latitude, item.coordinates.longitude] : [48.669, 19.699], // Default Slovakia coordinates
+      },
+      category: item.category || 'reenactment',
+      recurring: item.recurring || false,
+      featured: item.featured || false,
+      image: item.photo?.url ? (
+        item.photo.url.startsWith('http') ? 
+          // Force high quality for Cloudinary URLs
+          item.photo.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.photo.url}`
+      ) : '/images/gallery/roman-festival.png',
+    }));
+  } catch (error) {
+    console.error('Error fetching events:', error);
+    // Return mock events as fallback to prevent app crashes
+    return [
+      {
+        id: 1,
+        title: "Roman Festival in Bratislava",
+        description: "Experience authentic Roman culture with gladiator fights, traditional food, and historical demonstrations.",
+        startDate: "2024-04-15T10:00:00Z",
+        endDate: "2024-04-15T18:00:00Z",
+        location: {
+          name: "Bratislava Castle",
+          address: "Bratislava, Slovakia",
+          coordinates: [48.1426, 17.1017]
+        },
+        category: "reenactment",
+        recurring: false,
+        featured: true,
+        image: "/images/gallery/roman-festival.png"
+      },
+      {
+        id: 2,
+        title: "Legion Training Camp",
+        description: "Military training session focusing on Roman battle tactics and formations.",
+        startDate: "2024-04-20T09:00:00Z",
+        endDate: "2024-04-20T16:00:00Z",
+        location: {
+          name: "Devín Castle",
+          address: "Devín, Slovakia",
+          coordinates: [48.1756, 16.9819]
+        },
+        category: "training",
+        recurring: false,
+        featured: false,
+        image: "/images/gallery/colosseum-rome.jpeg"
+      }
+    ];
+  }
+}
+
+export async function createEvent(eventData: {
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress: string;
+  coordinates?: { latitude: number; longitude: number };
+  category: string;
+  recurring: boolean;
+  featured: boolean;
+  file?: File;
+}): Promise<StrapiEvent | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload the file if provided (same as gallery)
+    if (eventData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', eventData.file);
+
+      console.log('🔥 EVENT RAW UPLOAD: File size =', eventData.file.size, 'name =', eventData.file.name);
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('🎯 EVENT photo uploaded SUCCESS:', uploadedFiles?.length, 'files, first ID =', uploadedFiles?.[0]?.id);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Step 2: Create event entry with the uploaded file ID
+    const payload = {
+      data: {
+        title: eventData.title,
+        description: eventData.description,
+        startDate: eventData.startDate,
+        endDate: eventData.endDate,
+        locationName: eventData.locationName,
+        locationAddress: eventData.locationAddress,
+        coordinates: eventData.coordinates,
+        category: eventData.category,
+        recurring: eventData.recurring,
+        featured: eventData.featured,
+        photo: uploadedFile?.id, // Link to uploaded photo (backend expects 'photo' field)
+      }
+    };
+
+    console.log('📅 Creating new event:', payload);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Event creation failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Event created successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error creating event:', error);
+    return null;
+  }
+}
+
+export async function updateEvent(eventId: number | string, updateData: Partial<{
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress: string;
+  coordinates?: { latitude: number; longitude: number };
+  category: string;
+  recurring: boolean;
+  featured: boolean;
+  file?: File;
+}>): Promise<StrapiEvent | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload new file if provided (same as gallery)
+    if (updateData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', updateData.file);
+
+      console.log('🔥 RAW UPLOAD: Using raw-upload endpoint for update...');
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('Updated event photo uploaded:', uploadedFiles);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Step 2: Update event entry
+    const payload = {
+      ...updateData,
+      photo: uploadedFile?.id, // Link to new uploaded photo if provided (backend expects 'photo' field)
+    };
+    delete payload.file; // Remove file as it's now converted to image
+
+    console.log('📝 Updating event:', eventId, payload);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/events/${eventId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: payload }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Update failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Event updated successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error updating event:', error);
+    return null;
+  }
+}
+
+export async function deleteEvent(eventId: number | string): Promise<boolean> {
+  try {
+    console.log('🗑️ Deleting event:', eventId);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/events/${eventId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Delete failed! status: ${response.status}`);
+    }
+
+    console.log('✅ Event deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Error deleting event:', error);
+    return false;
+  }
+}
+
+// Activities API Types and Functions
+
+// Activity category mappings (same as in activities-manager.tsx)
+const activityCategoryReverseMapping = {
+  'Týždenný tréning': 'training',
+  'Stretnutie na Devíne': 'meeting',
+  'Workshop': 'workshop',
+  'Príprava výstroja': 'introduction',
+  'Stretnutie skupiny': 'meeting',
+  'Špeciálny tréning': 'training'
+} as const
+
+export type StrapiActivity = {
+  id: number;
+  documentId: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress: string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  category: 'training' | 'meeting' | 'workshop' | 'introduction';
+  maxParticipants: number;
+  currentParticipants: number;
+  recurring: boolean;
+  featured: boolean;
+  requiresExperience: boolean;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  image?: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string;
+};
+
+export type ActivityData = {
+  id: number;
+  documentId?: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  location: {
+    name: string;
+    address?: string;
+    coordinates: [number, number];
+  };
+  category: 'training' | 'meeting' | 'workshop' | 'introduction';
+  image?: string; // URL string for the image
+};
+
+// Fetch Activities from Strapi
+export async function fetchActivities(): Promise<ActivityData[]> {
+  try {
+    const response = await fetch(
+      `${STRAPI_BASE_URL}/api/activities?populate=image&sort=startDate:asc`,
+      {
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(`Activities API error: ${response.status} - using fallback data`);
+      // Return fallback activities data when API fails
+      return [
+        {
+          id: '1',
+          documentId: 'fallback-1',
+          title: 'Archeologický výskum - Carnuntum',
+          description: 'Objavte tajomstvá rímskej histórie v Carnuntume, kde sa stretávate s archeologickými nálezmi a rímskou kultúrou.',
+          startDate: '2024-12-15T09:00:00.000Z',
+          endDate: '2024-12-15T17:00:00.000Z',
+          location: {
+            name: 'Carnuntum Archaeological Park',
+            coordinates: [16.8744, 48.1103]
+          },
+          category: 'archaeology',
+          maxParticipants: 25,
+          currentParticipants: 12,
+          recurring: false,
+          featured: true,
+          requiresExperience: false,
+          difficulty: 'beginner',
+          image: {
+            url: '/images/carnuntum.jpg',
+            alt: 'Carnuntum Archaeological Site'
+          }
+        },
+        {
+          id: '2',
+          documentId: 'fallback-2',
+          title: 'Rímsky vojenský tábor - Vindobona',
+          description: 'Navštívte zvyšky rímskeho vojenského tábora vo Viedni a spoznajte život rímskych legionárov.',
+          startDate: '2024-12-20T10:00:00.000Z',
+          endDate: '2024-12-20T16:00:00.000Z',
+          location: {
+            name: 'Vienna Roman Museum',
+            coordinates: [16.3738, 48.2082]
+          },
+          category: 'military',
+          maxParticipants: 30,
+          currentParticipants: 18,
+          recurring: true,
+          featured: false,
+          requiresExperience: false,
+          difficulty: 'intermediate',
+          image: {
+            url: '/images/vindobona.jpg',
+            alt: 'Vindobona Roman Camp'
+          }
+        }
+      ];
+    }
+
+    const data = await response.json();
+    
+    return data.data.map((item: StrapiActivity): ActivityData => ({
+      id: item.id,
+      documentId: item.documentId,
+      title: item.title || 'Untitled Activity',
+      description: item.description || 'No description available',
+      startDate: item.startDate || new Date().toISOString(),
+      endDate: item.endDate || new Date().toISOString(),
+      location: {
+        name: item.locationName || 'Unknown Location',
+        address: item.locationAddress || '',
+        coordinates: item.coordinates ? [item.coordinates.latitude, item.coordinates.longitude] : [48.1486, 17.1077] as [number, number]
+      },
+      category: activityCategoryReverseMapping[item.category] || item.category || 'training',
+      image: item.image?.url ? (
+        item.image.url.startsWith('http') ? 
+          // Force high quality for Cloudinary URLs
+          item.image.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.image.url}`
+      ) : undefined,
+    }));
+  } catch (error) {
+    console.error('Error fetching activities:', error);
+    // Return mock activities as fallback to prevent app crashes
+    return [
+      {
+        id: 1,
+        title: "Týždenný tréning",
+        description: "Pravidelný tréning pre všetkých členov. Nácvik formácií, bojových techník a historickej presnosti.",
+        startDate: "2025-05-16T17:00:00",
+        endDate: "2025-05-16T19:00:00",
+        location: {
+          name: "Sad Janka Kráľa",
+          address: "Sad Janka Kráľa, Bratislava",
+          coordinates: [48.1359, 17.1178]
+        },
+        category: "training",
+        recurring: true,
+        featured: true,
+        maxParticipants: 15,
+        currentParticipants: 8,
+        requiresExperience: false,
+        difficulty: "beginner",
+        image: "/images/gallery/roman-training.png"
+      },
+      {
+        id: 2,
+        title: "Club meetings in Devin",
+        description: "Regular club meetings for all members to discuss upcoming events, historical research, and equipment.",
+        startDate: "2025-06-02T18:00:00",
+        endDate: "2025-06-02T20:00:00",
+        location: {
+          name: "Devín Castle",
+          address: "Devín Castle, Bratislava",
+          coordinates: [48.1744, 16.9798]
+        },
+        category: "meeting",
+        recurring: true,
+        featured: false,
+        maxParticipants: 25,
+        currentParticipants: 12,
+        requiresExperience: false,
+        difficulty: "beginner",
+        image: "/images/gallery/roman-camp.png"
+      }
+    ];
+  }
+}
+
+export async function createActivity(activityData: {
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress?: string;
+  coordinates?: { latitude: number; longitude: number };
+  category: string;
+  file?: File;
+}): Promise<StrapiActivity | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload the file if provided
+    if (activityData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', activityData.file);
+
+      console.log('🔥 ACTIVITY RAW UPLOAD: File size =', activityData.file.size, 'name =', activityData.file.name);
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('🎯 ACTIVITY photo uploaded SUCCESS:', uploadedFiles?.length, 'files, first ID =', uploadedFiles?.[0]?.id);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Create activity entry with image and coordinates
+    const payload = {
+      data: {
+        title: activityData.title,
+        description: activityData.description,
+        startDate: activityData.startDate,
+        endDate: activityData.endDate,
+        locationName: activityData.locationName,
+        locationAddress: activityData.locationAddress || '',
+        coordinates: activityData.coordinates,
+        category: activityData.category,
+        image: uploadedFile?.id, // Link to uploaded image
+      }
+    };
+
+    console.log('📅 Creating new activity:', payload);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/activities`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Activity creation failed with details:', errorText);
+      throw new Error(`Activity creation failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Activity created successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error creating activity:', error);
+    return null;
+  }
+}
+
+export async function updateActivity(activityId: number | string, updateData: Partial<{
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  locationName: string;
+  locationAddress: string;
+  coordinates?: { latitude: number; longitude: number };
+  category: string;
+  maxParticipants?: number;
+  currentParticipants?: number;
+  recurring: boolean;
+  featured: boolean;
+  requiresExperience?: boolean;
+  difficulty?: string;
+  file?: File;
+}>): Promise<StrapiActivity | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload new file if provided
+    if (updateData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', updateData.file);
+
+      console.log('🔥 RAW UPLOAD: Using raw-upload endpoint for activity update...');
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('Updated activity photo uploaded:', uploadedFiles);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Step 2: Update activity entry - use documentId for Strapi 5
+    const payload = {
+      ...updateData,
+      image: uploadedFile?.id, // Link to new uploaded photo if provided
+    };
+    delete payload.file; // Remove file as it's now converted to image
+
+    console.log('📝 Updating activity with ID:', activityId, payload);
+    
+    // First try with documentId (Strapi 5 format)
+    let response = await fetch(`${STRAPI_BASE_URL}/api/activities/${activityId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: payload }),
+    });
+
+    // If 404, try with numeric ID as fallback
+    if (response.status === 404 && typeof activityId === 'number') {
+      console.log('🔄 Retrying update with numeric ID fallback...');
+      response = await fetch(`${STRAPI_BASE_URL}/api/activities/${activityId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ data: payload }),
+      });
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Activity update failed with details:', errorText);
+      throw new Error(`Update failed! status: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Activity updated successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error updating activity:', error);
+    return null;
+  }
+}
+
+export async function deleteActivity(activityId: number | string): Promise<boolean> {
+  try {
+    console.log('🗑️ Deleting activity with ID:', activityId);
+    let response = await fetch(`${STRAPI_BASE_URL}/api/activities/${activityId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    // If 404, try with numeric ID as fallback
+    if (response.status === 404 && typeof activityId === 'number') {
+      console.log('🔄 Retrying delete with numeric ID fallback...');
+      response = await fetch(`${STRAPI_BASE_URL}/api/activities/${activityId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Activity delete failed with details:', errorText);
+      throw new Error(`Delete failed! status: ${response.status} - ${errorText}`);
+    }
+
+    console.log('✅ Activity deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Error deleting activity:', error);
+    return false;
+  }
+}
+
+// History Articles API Types and Functions
+export type StrapiArticleSection = {
+  id: number;
+  title: string;
+  content: string;
+  quote?: string;
+  additionalContent?: string[];
+};
+
+export type StrapiArticleImage = {
+  id: number;
+  image: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  alt: string;
+  caption: string;
+  description?: string;
+};
+
+export type StrapiKeyFact = {
+  id: number;
+  number: number;
+  title: string;
+  description: string;
+};
+
+export type StrapiTimelineEvent = {
+  id: number;
+  year: string;
+  event: string;
+};
+
+export type StrapiUnitType = {
+  id: number;
+  title: string;
+  units: string[];
+};
+
+export type StrapiHistoryArticle = {
+  id: number;
+  documentId: string;
+  title: string;
+  subtitle?: string;
+  content: string;
+  excerpt?: string;
+  slug: string;
+  category: 'auxiliary-forces' | 'equipment' | 'tactics' | 'history' | 'archaeology' | 'sources' | 'legion-history';
+  author: string;
+  readingTime?: number;
+  featured: boolean;
+  tags?: string[];
+  sources?: any;
+  intro?: string;
+  articleType: 'standard' | 'auxiliary-forces' | 'legion-timeline';
+  coverImage?: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  heroImage?: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  mainImage?: {
+    id: number;
+    url: string;
+    alternativeText?: string;
+    width: number;
+    height: number;
+  };
+  sections?: StrapiArticleSection[];
+  images?: StrapiArticleImage[];
+  keyFacts?: StrapiKeyFact[];
+  timeline?: StrapiTimelineEvent[];
+  unitTypes?: StrapiUnitType[];
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string;
+};
+
+export type HistoryArticleData = {
+  id: number;
+  documentId?: string;
+  title: string;
+  subtitle?: string;
+  content: string;
+  excerpt?: string;
+  slug: string;
+  category: string;
+  author: string;
+  readingTime?: number;
+  featured: boolean;
+  coverImage?: string; // URL string for the image
+  heroImage?: string;
+  mainImage?: string;
+  tags?: string[];
+  intro?: string;
+  articleType?: string;
+  sections?: {
+    title: string;
+    content: string;
+    quote?: string;
+    additionalContent?: string[];
+  }[];
+  images?: {
+    src: string;
+    alt: string;
+    caption: string;
+    description?: string;
+  }[];
+  keyFacts?: {
+    number: number;
+    title: string;
+    description: string;
+  }[];
+  timeline?: {
+    year: string;
+    event: string;
+  }[];
+  unitTypes?: {
+    title: string;
+    units: string[];
+  }[];
+  contentBlocks?: any[];  // Dynamic zone for content blocks (includes rich.content-block)
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+// Fetch History Articles from Strapi
+export async function fetchHistoryArticles(): Promise<HistoryArticleData[]> {
+  try {
+    const response = await fetch(
+      `${STRAPI_BASE_URL}/api/history-articles?populate=*&sort=featured:desc,createdAt:desc`,
+      {
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(`History Articles API error: ${response.status} - using fallback data`);
+      // Return fallback articles data when API fails
+      return [
+        {
+          id: 1,
+          title: 'Rímske pomocné jednotky v Panónii',
+          subtitle: 'Štruktúra a organizácia auxilií',
+          content: 'Pomocné jednotky hrali kľúčovú úlohu v rímskej armáde...',
+          excerpt: 'Objavte fascinujúci svet rímskych pomocných jednotiek a ich význam pre rímsku armádu.',
+          slug: 'rimske-pomocne-jednotky-panonia',
+          category: 'auxiliary-forces',
+          author: 'SCEAR',
+          readingTime: 8,
+          featured: true,
+          coverImage: '/images/gallery/roman-legionaries.jpeg',
+          tags: ['pomocné jednotky', 'panónia', 'auxilium'],
+        },
+        {
+          id: 2,
+          title: 'Vzbrojenie a výzbroj pomocných jednotiek',
+          subtitle: 'Technická analýza historických nálezov',
+          content: 'Archeologické nálezy nám poskytujú detailný obraz...',
+          excerpt: 'Analýza archeologických nálezov vzbrojenia a výzbroje rímskych pomocných jednotiek.',
+          slug: 'vzbrojenie-vyzboj-pomocne-jednotky',
+          category: 'equipment',
+          author: 'SCEAR',
+          readingTime: 12,
+          featured: false,
+          coverImage: '/images/gallery/roman-weapons.png',
+          tags: ['vzbrojenie', 'archeológia', 'výzbroj'],
+        }
+      ];
+    }
+
+    const data = await response.json();
+    
+    const filteredArticles = data.data.filter((item: StrapiHistoryArticle) => item.publishedAt);
+    
+    // Process articles with async image handling
+    const processedArticles = await Promise.all(
+      filteredArticles.map(async (item: StrapiHistoryArticle): Promise<HistoryArticleData> => {
+        // Handle images with async processing
+        let processedImages: HistoryArticleData['images'] = undefined;
+        
+        if (Array.isArray(item.images)) {
+          // Check if images have media IDs only
+          const hasOnlyIds = item.images.some(img => typeof img.image === 'number' && !img.image?.url);
+          
+          if (hasOnlyIds) {
+            try {
+              // Fetch all media files once
+              const mediaResponse = await fetch(`${STRAPI_BASE_URL}/api/upload/files`);
+              if (mediaResponse.ok) {
+                const allMedia = await mediaResponse.json();
+                const mediaMap = new Map(allMedia.map(media => [media.id, media]));
+                
+                processedImages = item.images.map(image => {
+                  const mediaId = typeof image.image === 'number' ? image.image : image.image?.id;
+                  const mediaFile = mediaMap.get(mediaId);
+                  
+                  return {
+                    src: mediaFile?.url ? (
+                      mediaFile.url.startsWith('http') ? 
+                        mediaFile.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+                        : `${STRAPI_BASE_URL}${mediaFile.url}`
+                    ) : '/placeholder.svg',
+                    alt: image.alt || 'Image',
+                    caption: image.caption || 'Image', 
+                    description: image.description || undefined
+                  };
+                });
+              }
+            } catch (error) {
+              console.error('Failed to fetch media for images:', error);
+              // Fallback to original logic
+              processedImages = item.images.map(image => ({
+                src: '/placeholder.svg',
+                alt: image.alt || 'Image',
+                caption: image.caption || 'Image',
+                description: image.description || undefined
+              }));
+            }
+          } else {
+            // Original logic for populated images
+            processedImages = item.images.map(image => ({
+              src: image.image?.url ? (
+                image.image.url.startsWith('http') ? 
+                  image.image.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+                  : `${STRAPI_BASE_URL}${image.image.url}`
+              ) : '/placeholder.svg',
+              alt: image.alt || 'Image',
+              caption: image.caption || 'Image',
+              description: image.description || undefined
+            }));
+          }
+        }
+        
+        return {
+          id: item.id,
+          documentId: item.documentId,
+          title: item.title || 'Untitled Article',
+          subtitle: item.description, // Backend uses 'description' for subtitle
+          content: item.mainContent || 'No content available', // Backend uses 'mainContent' for content
+          excerpt: item.excerpt || (item.intro ? item.intro.substring(0, 200) + '...' : '') || (item.mainContent ? item.mainContent.substring(0, 200) + '...' : '') || 'No excerpt available',
+          slug: item.slug,
+          category: item.category || 'history',
+          author: item.author || 'SCEAR',
+          readingTime: item.readTime, // Backend uses 'readTime' not 'readingTime'
+          featured: item.featured || false,
+          coverImage: item.coverImage?.url ? (
+            item.coverImage.url.startsWith('http') ?
+              item.coverImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+              : `${STRAPI_BASE_URL}${item.coverImage.url}`
+          ) : undefined,
+          heroImage: item.heroImage?.url ? (
+            item.heroImage.url.startsWith('http') ?
+              item.heroImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+              : `${STRAPI_BASE_URL}${item.heroImage.url}`
+          ) : undefined,
+          mainImage: item.mainImage?.url ? (
+            item.mainImage.url.startsWith('http') ?
+              item.mainImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+              : `${STRAPI_BASE_URL}${item.mainImage.url}`
+          ) : undefined,
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          intro: item.intro,
+          articleType: item.articleType,
+          sections: Array.isArray(item.sections) ? item.sections.map(section => ({
+            title: section.title || '',
+            content: section.content || '',
+            quote: section.quote || undefined,
+            additionalContent: Array.isArray(section.additionalContent) ? section.additionalContent : []
+          })) : undefined,
+          images: processedImages,
+          keyFacts: Array.isArray(item.keyFacts) ? item.keyFacts.map(fact => ({
+            number: fact.number || 1,
+            title: fact.title || '',
+            description: fact.description || ''
+          })) : undefined,
+          timeline: Array.isArray(item.timeline) ? item.timeline.map(event => ({
+            year: event.year || '',
+            event: event.event || ''
+          })) : undefined,
+          unitTypes: Array.isArray(item.unitTypes) ? item.unitTypes.map(unitType => ({
+            title: unitType.title || '',
+            units: Array.isArray(unitType.units) ? unitType.units : []
+          })) : undefined,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        };
+      })
+    );
+    
+    return processedArticles;
+  } catch (error) {
+    console.error('Error fetching history articles:', error);
+    // Return mock articles as fallback to prevent app crashes
+    return [
+      {
+        id: 1,
+        title: 'XV. légia Apollinaris na Dunaji',
+        subtitle: 'História a pôsobenie légií v naších krajinách',
+        content: 'XV. légia Apollinaris bola jedna z najvýznamnejších rímskych légií...',
+        excerpt: 'Spoznajte históriu XV. légie Apollinaris a jej pôsobenie na území dnešného Slovenska.',
+        slug: 'xv-legia-apollinaris-dunaj',
+        category: 'history',
+        author: 'SCEAR',
+        readingTime: 10,
+        featured: true,
+        coverImage: '/images/gallery/roman-legion.png',
+        tags: ['légia', 'dunaj', 'apollinaris'],
+      },
+      {
+        id: 2,
+        title: 'Rímsky vojenský tábor v Gerulata',
+        subtitle: 'Archeologické nálezy z Rusoviec',
+        content: 'Gerulata bola významným rímskym vojenským táborom...',
+        excerpt: 'Objavte tajomstvá rímskeho vojenského tábora Gerulata na území dnešných Rusoviec.',
+        slug: 'rimsky-tabor-gerulata',
+        category: 'archaeology',
+        author: 'SCEAR',
+        readingTime: 15,
+        featured: false,
+        coverImage: '/images/gallery/gerulata-excavation.png',
+        tags: ['gerulata', 'archeológia', 'rusovce'],
+      }
+    ];
+  }
+}
+
+// Fetch single History Article by slug
+export async function fetchHistoryArticleBySlug(slug: string): Promise<HistoryArticleData | null> {
+  try {
+    // Use populate=* for Strapi 5 compatibility
+    const populateParam = 'populate=*';
+
+    let response = await fetch(
+      `${STRAPI_BASE_URL}/api/history-articles?${populateParam}&filters[slug][$eq]=${encodeURIComponent(slug)}`,
+      {
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    // If first populate fails, try simpler populate
+    if (!response.ok) {
+      console.log('First populate failed, trying simpler populate...');
+      const simplePopulate = 'populate=*';
+      response = await fetch(
+        `${STRAPI_BASE_URL}/api/history-articles?${simplePopulate}&filters[slug][$eq]=${encodeURIComponent(slug)}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+    }
+
+    // Final fallback to basic populate
+    if (!response.ok) {
+      console.log('ContentBlocks populate failed, trying basic populate...');
+      response = await fetch(
+        `${STRAPI_BASE_URL}/api/history-articles?populate=*&filters[slug][$eq]=${encodeURIComponent(slug)}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+    }
+
+    if (!response.ok) {
+      console.error(`History article API error for slug "${slug}": ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    // Handle different response formats (custom endpoint vs standard endpoint)
+    let item;
+    if (data.data && Array.isArray(data.data)) {
+      // Standard endpoint format
+      if (data.data.length === 0) return null;
+      item = data.data[0];
+    } else if (data.data && !Array.isArray(data.data)) {
+      // Custom endpoint format
+      item = data.data;
+    } else {
+      return null;
+    }
+    
+    return {
+      id: item.id,
+      documentId: item.documentId,
+      title: item.title || 'Untitled Article',
+      subtitle: item.description, // Backend uses 'description' for subtitle
+      content: item.mainContent || 'No content available', // Backend uses 'mainContent' not 'content'
+      excerpt: item.excerpt || (item.intro ? item.intro.substring(0, 200) + '...' : '') || (item.mainContent ? item.mainContent.substring(0, 200) + '...' : '') || 'No excerpt available',
+      slug: item.slug,
+      category: item.category || 'history',
+      author: item.author || 'SCEAR',
+      readingTime: item.readTime, // Backend uses 'readTime' not 'readingTime'
+      featured: item.featured || false,
+      coverImage: item.coverImage?.url ? (
+        item.coverImage.url.startsWith('http') ?
+          item.coverImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.coverImage.url}`
+      ) : undefined,
+      heroImage: item.heroImage?.url ? (
+        item.heroImage.url.startsWith('http') ?
+          item.heroImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.heroImage.url}`
+      ) : undefined,
+      mainImage: item.mainImage?.url ? (
+        item.mainImage.url.startsWith('http') ?
+          item.mainImage.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+          : `${STRAPI_BASE_URL}${item.mainImage.url}`
+      ) : undefined,
+      tags: Array.isArray(item.tags) ? item.tags : [],
+      intro: item.intro,
+      articleType: item.articleType,
+      sections: Array.isArray(item.sections) ? item.sections.map(section => ({
+        title: section.title || '',
+        content: section.content || '',
+        quote: section.quote || undefined,
+        additionalContent: Array.isArray(section.additionalContent) ? section.additionalContent : []
+      })) : undefined,
+      images: Array.isArray(item.images) ? await (async () => {
+        // Check if images have media IDs only
+        const hasOnlyIds = item.images.some(img => typeof img.image === 'number' && !img.image?.url);
+        
+        if (hasOnlyIds) {
+          try {
+            // Fetch all media files once
+            const mediaResponse = await fetch(`${STRAPI_BASE_URL}/api/upload/files`);
+            if (mediaResponse.ok) {
+              const allMedia = await mediaResponse.json();
+              const mediaMap = new Map(allMedia.map(media => [media.id, media]));
+              
+              return item.images.map(image => {
+                const mediaId = typeof image.image === 'number' ? image.image : image.image?.id;
+                const mediaFile = mediaMap.get(mediaId);
+                
+                return {
+                  src: mediaFile?.url ? (
+                    mediaFile.url.startsWith('http') ? 
+                      mediaFile.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+                      : `${STRAPI_BASE_URL}${mediaFile.url}`
+                  ) : '/placeholder.svg',
+                  alt: image.alt || 'Image',
+                  caption: image.caption || 'Image', 
+                  description: image.description || undefined
+                };
+              });
+            }
+          } catch (error) {
+            console.error('Failed to fetch media for images:', error);
+            // Fallback to original logic
+            return item.images.map(image => ({
+              src: '/placeholder.svg',
+              alt: image.alt || 'Image',
+              caption: image.caption || 'Image',
+              description: image.description || undefined
+            }));
+          }
+        }
+        
+        // Original logic for populated images
+        return item.images.map(image => ({
+          src: image.image?.url ? (
+            image.image.url.startsWith('http') ? 
+              image.image.url.replace('/upload/', '/upload/q_100,f_auto,dpr_auto,c_limit,w_1200/')
+              : `${STRAPI_BASE_URL}${image.image.url}`
+          ) : '/placeholder.svg',
+          alt: image.alt || 'Image',
+          caption: image.caption || 'Image',
+          description: image.description || undefined
+        }));
+      })() : undefined,
+      keyFacts: Array.isArray(item.keyFacts) ? item.keyFacts.map(fact => ({
+        number: fact.number || 1,
+        title: fact.title || '',
+        description: fact.description || ''
+      })) : undefined,
+      timeline: Array.isArray(item.timeline) ? item.timeline.map(event => ({
+        year: event.year || '',
+        event: event.event || ''
+      })) : undefined,
+      unitTypes: Array.isArray(item.unitTypes) ? item.unitTypes.map(unitType => ({
+        title: unitType.title || '',
+        units: Array.isArray(unitType.units) ? unitType.units : []
+      })) : undefined,
+      contentBlocks: Array.isArray(item.contentBlocks) ? await (async () => {
+        // Fetch all media files for manual population of contentBlocks images
+        let mediaMap = new Map();
+        try {
+          const mediaResponse = await fetch(`${STRAPI_BASE_URL}/api/upload/files`);
+          if (mediaResponse.ok) {
+            const allMedia = await mediaResponse.json();
+            mediaMap = new Map(allMedia.map(media => [media.id, media]));
+            console.log(`📸 Loaded ${allMedia.length} media files for contentBlocks`);
+          }
+        } catch (error) {
+          console.error('Failed to fetch media for contentBlocks:', error);
+        }
+
+        return item.contentBlocks.map(block => {
+          console.log('🔍 Processing contentBlock:');
+          console.log('  - component:', block.__component);
+          console.log('  - image:', block.image);
+          console.log('  - image_id:', block.image_id);
+          console.log('  - keys:', Object.keys(block).join(', '));
+
+          // Check if block needs image population
+          if (block.__component === 'content.floating-text-image' || block.__component === 'article.content-image') {
+            // Check all possible image field variations
+            const imageId = block.image_id || block.imageId || block.image;
+
+            if (imageId && typeof imageId === 'number' && !block.image?.url) {
+              const mediaFile = mediaMap.get(imageId);
+              if (mediaFile) {
+                console.log(`✅ Populating image from ID: ${imageId}, found:`, mediaFile.name);
+                block.image = {
+                  id: mediaFile.id,
+                  url: mediaFile.url.startsWith('http') ?
+                    mediaFile.url : `${STRAPI_BASE_URL}${mediaFile.url}`,
+                  name: mediaFile.name,
+                  alternativeText: mediaFile.alternativeText,
+                  width: mediaFile.width,
+                  height: mediaFile.height,
+                  formats: mediaFile.formats
+                };
+              } else {
+                console.warn(`❌ No media found for ID: ${imageId}`);
+              }
+            }
+            // If image is already an object but missing URL
+            else if (block.image && typeof block.image === 'object' && !block.image.url) {
+              const mediaFile = mediaMap.get(block.image.id);
+              if (mediaFile) {
+                console.log(`✅ Fixing image object for ID: ${block.image.id}`);
+                block.image = {
+                  ...block.image,
+                  url: mediaFile.url.startsWith('http') ?
+                    mediaFile.url : `${STRAPI_BASE_URL}${mediaFile.url}`,
+                  name: mediaFile.name || block.image.name,
+                  alternativeText: mediaFile.alternativeText || block.image.alternativeText,
+                  width: mediaFile.width || block.image.width,
+                  height: mediaFile.height || block.image.height,
+                  formats: mediaFile.formats || block.image.formats
+                };
+              }
+            }
+          }
+          return block;
+        });
+      })() : [],
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+  } catch (error) {
+    console.error('Error fetching history article by slug:', error);
+    return null;
+  }
+}
+
+// Create History Article
+export async function createHistoryArticle(articleData: {
+  title: string;
+  subtitle?: string;
+  content: string;
+  excerpt?: string;
+  category: string;
+  author?: string;
+  readingTime?: number;
+  featured?: boolean;
+  tags?: string[];
+  file?: File;
+}): Promise<StrapiHistoryArticle | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload the cover image if provided
+    if (articleData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', articleData.file);
+
+      console.log('🔥 HISTORY ARTICLE RAW UPLOAD: File size =', articleData.file.size, 'name =', articleData.file.name);
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('🎯 HISTORY ARTICLE cover image uploaded SUCCESS:', uploadedFiles?.length, 'files, first ID =', uploadedFiles?.[0]?.id);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Step 2: Create history article entry - map fields to backend schema
+    const payload = {
+      data: {
+        title: articleData.title,
+        description: articleData.subtitle || articleData.excerpt || articleData.title, // Backend expects 'description'
+        mainContent: articleData.content, // Backend expects 'mainContent'
+        intro: articleData.excerpt || (articleData.content ? articleData.content.substring(0, 200) : ''), // Backend expects 'intro'
+        category: articleData.category, // Should be already mapped by frontend
+        author: articleData.author || 'SCEAR',
+        readTime: articleData.readingTime || 5, // Backend expects 'readTime'
+        featured: articleData.featured || false,
+        publishedDate: new Date().toISOString().split('T')[0], // Backend requires publishedDate
+        tags: articleData.tags || [],
+        heroImage: uploadedFile?.id, // Backend expects 'heroImage' as required field
+      }
+    };
+
+    console.log('📝 Creating new history article:', payload);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/history-articles`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ History article creation failed with details:', errorText);
+      throw new Error(`History article creation failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ History article created successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error creating history article:', error);
+    return null;
+  }
+}
+
+// Update History Article
+export async function updateHistoryArticle(articleId: number | string, updateData: Partial<{
+  title: string;
+  subtitle?: string;
+  content: string;
+  excerpt?: string;
+  category: string;
+  author?: string;
+  readingTime?: number;
+  featured?: boolean;
+  tags?: string[];
+  file?: File;
+}>): Promise<StrapiHistoryArticle | null> {
+  try {
+    let uploadedFile = null;
+    
+    // Step 1: Upload new cover image if provided
+    if (updateData.file) {
+      const fileFormData = new FormData();
+      fileFormData.append('files', updateData.file);
+
+      console.log('🔥 RAW UPLOAD: Using raw-upload endpoint for history article update...');
+      const fileResponse = await fetch(`${STRAPI_BASE_URL}/api/raw-upload`, {
+        method: 'POST',
+        body: fileFormData,
+      });
+
+      if (!fileResponse.ok) {
+        throw new Error(`File upload failed! status: ${fileResponse.status}`);
+      }
+
+      const uploadedFiles = await fileResponse.json();
+      console.log('Updated history article cover image uploaded:', uploadedFiles);
+      
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
+    }
+
+    // Step 2: Update history article entry
+    const payload = {
+      ...updateData,
+      coverImage: uploadedFile?.id, // Link to new uploaded image if provided
+    };
+    delete payload.file; // Remove file as it's now converted to coverImage
+
+    console.log('📝 Updating history article:', articleId, payload);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/history-articles/${articleId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: payload }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Update failed! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ History article updated successfully');
+    return result.data;
+  } catch (error) {
+    console.error('❌ Error updating history article:', error);
+    return null;
+  }
+}
+
+// Delete History Article
+export async function deleteHistoryArticle(articleId: number | string): Promise<boolean> {
+  try {
+    console.log('🗑️ Deleting history article:', articleId);
+    const response = await fetch(`${STRAPI_BASE_URL}/api/history-articles/${articleId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Delete failed! status: ${response.status}`);
+    }
+
+    console.log('✅ History article deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Error deleting history article:', error);
+    return false;
+  }
+}

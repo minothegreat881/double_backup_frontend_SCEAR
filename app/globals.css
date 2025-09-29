@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 20 14.3% 4.1%;
+    --card: 0 0% 100%;
+    --card-foreground: 20 14.3% 4.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14.3% 4.1%;
+    --primary: 0 72.2% 30.6%;
+    --primary-foreground: 60 9.1% 97.8%;
+    --secondary: 60 4.8% 95.9%;
+    --secondary-foreground: 24 9.8% 10%;
+    --muted: 60 4.8% 95.9%;
+    --muted-foreground: 25 5.3% 44.7%;
+    --accent: 60 4.8% 95.9%;
+    --accent-foreground: 24 9.8% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 60 9.1% 97.8%;
+    --border: 20 5.9% 90%;
+    --input: 20 5.9% 90%;
+    --ring: 20 14.3% 4.1%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 20 14.3% 4.1%;
+    --foreground: 60 9.1% 97.8%;
+    --card: 20 14.3% 4.1%;
+    --card-foreground: 60 9.1% 97.8%;
+    --popover: 20 14.3% 4.1%;
+    --popover-foreground: 60 9.1% 97.8%;
+    --primary: 0 72.2% 40.6%;
+    --primary-foreground: 60 9.1% 97.8%;
+    --secondary: 12 6.5% 15.1%;
+    --secondary-foreground: 60 9.1% 97.8%;
+    --muted: 12 6.5% 15.1%;
+    --muted-foreground: 24 5.4% 63.9%;
+    --accent: 12 6.5% 15.1%;
+    --accent-foreground: 60 9.1% 97.8%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 60 9.1% 97.8%;
+    --border: 12 6.5% 15.1%;
+    --input: 12 6.5% 15.1%;
+    --ring: 24 5.7% 82.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Lightbox critical fixes */
+  .lightbox-open {
+    overflow: hidden !important;
+  }
+
+  .lightbox-open header {
+    display: none !important;
+  }
+
+  .lightbox-open footer {
+    display: none !important;
+  }
+
+  /* Article Image Block Styles - Text Wrapping */
+  .image-block {
+    @apply break-inside-avoid;
+  }
+
+  /* Clear floats after article content */
+  .article-content::after {
+    content: "";
+    display: table;
+    clear: both;
+  }
+
+  /* Ensure proper text flow around images */
+  .image-block.float-left {
+    shape-outside: margin-box;
+  }
+
+  .image-block.float-right {
+    shape-outside: margin-box;
+  }
+
+  /* Responsive adjustments for mobile */
+  @media (max-width: 768px) {
+    .image-block.float-left,
+    .image-block.float-right {
+      float: none !important;
+      width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      margin-bottom: 1.5rem !important;
+    }
+
+    .image-block[class*="w-["] {
+      width: 100% !important;
+    }
+  }
+
+  /* Prevent text orphans around images */
+  .article-content p {
+    hyphens: auto;
+    word-break: break-word;
+  }
+
+  /* Enhanced spacing for better readability */
+  .article-content .image-block + p {
+    margin-top: 0;
+  }
+
+  .article-content p + .image-block {
+    margin-top: 1.5rem;
+  }
+}
